@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
+@import "tailwindcss";
+
+@theme {
+    --color-primary: #06B6D4;
+    --color-background-light: #F8FAFC;
+    --color-background-dark: #0F172A;
+    --color-surface-dark: #1E293B;
+    --color-accent-orange: #F59E0B;
+    --font-display: "Inter", sans-serif;
+    --radius-DEFAULT: 0.75rem;
+
+    /* Custom Animations */
+    --animate-fade-in-up: fadeInUp 0.5s ease-out forwards;
+    --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    --animate-float: float 6s ease-in-out infinite;
+
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @keyframes float {
+
+        0%,
+        100% {
+            transform: translateY(0);
+        }
+
+        50% {
+            transform: translateY(-5px);
+        }
+    }
+}
+
+:root {
+    color-scheme: light;
+    /* Enforce light mode */
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Custom Utilities */
+.glass {
+    background: rgba(255, 255, 255, 0.7);
+    /* Light mode glass */
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.card-glow-orange {
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
