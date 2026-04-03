@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
                 : 'N/A';
 
             message = `
-🐄 *CATTLE VISION \\- Procesamiento Completado*
+🐄 *DLOS AI \\- Procesamiento Completado*
 
 ✅ *Estado:* Proceso finalizado con éxito
 
@@ -64,7 +64,7 @@ _ID: ${escapeMarkdownV2(payload.jobId)}_
             `.trim();
         } else {
             message = `
-🐄 *CATTLE VISION \\- Error en Procesamiento*
+🐄 *DLOS AI \\- Error en Procesamiento*
 
 ❌ *Estado:* El procesamiento ha fallado
 

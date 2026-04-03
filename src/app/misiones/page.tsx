@@ -1,9 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Link from 'next/link';
+import { formatDate, formatDuration } from '@/lib/utils';
+
+// Mapa UUID → nombre legible (disponible en cliente vía NEXT_PUBLIC_UUID_NAMES)
+let UUID_NAMES: Record<string, string> = {};
+try {
+    if (process.env.NEXT_PUBLIC_UUID_NAMES) {
+        UUID_NAMES = JSON.parse(process.env.NEXT_PUBLIC_UUID_NAMES);
+    }
+} catch { /* ignorar JSON inválido */ }
+
+function resolveName(value: string): string {
+    if (!value) return value;
+    // Si es un UUID (contiene guiones y es largo), intentar resolverlo
+    const resolved = UUID_NAMES[value];
+    if (resolved) return resolved;
+    // Si contiene un UUID dentro (ej: path con UUIDs), sustituir cada UUID
+    return value.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, (uuid) =>
+        UUID_NAMES[uuid] || uuid.substring(0, 8) + '…'
+    );
+}
 
 interface Mission {
     id: string;
@@ -16,6 +36,7 @@ interface Mission {
     completedAt?: any;
     vastGpu?: string;
     vastPrice?: number;
+    analysisStatus?: string;
 }
 
 export default function MisionesPage() {
@@ -47,6 +68,7 @@ export default function MisionesPage() {
                     completedAt: data.completedAt,
                     vastGpu: data.vastGpu,
                     vastPrice: data.vastPrice,
+                    analysisStatus: data.analysisStatus,
                 });
             });
 
@@ -58,10 +80,9 @@ export default function MisionesPage() {
         }
     };
 
-    const filteredMissions = missions.filter((m) => {
-        if (filter === 'all') return true;
-        return m.status === filter;
-    });
+    const filteredMissions = useMemo(() =>
+        missions.filter(m => filter === 'all' || m.status === filter),
+    [missions, filter]);
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -104,29 +125,12 @@ export default function MisionesPage() {
         }
     };
 
-    const formatDate = (timestamp: any) => {
-        if (!timestamp) return 'N/A';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-        return date.toLocaleDateString('es-ES', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
-
-    const formatDuration = (seconds?: number) => {
-        if (!seconds) return '-';
-        if (seconds < 60) return `${seconds.toFixed(0)}s`;
-        return `${(seconds / 60).toFixed(1)} min`;
-    };
 
     if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
                 <div className="text-center">
-                    <span className="text-4xl animate-pulse">🐄</span>
+                    <div className="w-10 h-10 border-2 border-slate-200 border-t-primary rounded-full animate-spin mx-auto" />
                     <p className="mt-4 text-slate-500">Cargando misiones...</p>
                 </div>
             </div>
@@ -158,7 +162,12 @@ export default function MisionesPage() {
             <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6 hide-scrollbar pb-24 lg:pb-8">
                 {/* Filters */}
                 <div className="flex gap-2 flex-wrap">
-                    {(['all', 'completed', 'processing', 'failed'] as const).map((f) => (
+                    {([
+                        ['all',        'Todas'      ],
+                        ['completed',  'Completadas'],
+                        ['processing', 'En proceso' ],
+                        ['failed',     'Fallidas'   ],
+                    ] as const).map(([f, label]) => (
                         <button
                             key={f}
                             onClick={() => setFilter(f)}
@@ -167,10 +176,7 @@ export default function MisionesPage() {
                                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                 }`}
                         >
-                            {f === 'all' && '📋 Todas'}
-                            {f === 'completed' && '✅ Completadas'}
-                            {f === 'processing' && '⏳ En proceso'}
-                            {f === 'failed' && '❌ Fallidas'}
+                            {label}
                         </button>
                     ))}
                 </div>
@@ -218,22 +224,22 @@ export default function MisionesPage() {
                                                 {mission.missionName.replace('dlos_', '')}
                                             </h3>
                                             {getStatusBadge(mission.status)}
+                                            {mission.analysisStatus === 'completed' && (
+                                                <span className="px-2 py-1 text-xs font-bold rounded-full bg-primary/10 text-primary flex items-center gap-1">
+                                                    <span className="material-icons-round text-xs">smart_toy</span>
+                                                    IA
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex flex-wrap gap-4 text-sm text-slate-500">
                                             <span className="flex items-center gap-1">
                                                 <span className="material-icons-round text-sm">location_on</span>
-                                                {mission.siteName}
+                                                {resolveName(mission.siteName)}
                                             </span>
                                             <span className="flex items-center gap-1">
                                                 <span className="material-icons-round text-sm">schedule</span>
                                                 {formatDate(mission.createdAt)}
                                             </span>
-                                            {mission.vastGpu && (
-                                                <span className="flex items-center gap-1">
-                                                    <span className="material-icons-round text-sm">memory</span>
-                                                    {mission.vastGpu}
-                                                </span>
-                                            )}
                                         </div>
                                     </div>
 

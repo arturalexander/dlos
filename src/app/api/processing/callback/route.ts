@@ -111,6 +111,9 @@ export async function POST(request: NextRequest) {
                 status: 'completed',
             });
 
+            // 6. LANZAR ANÁLISIS IA (fire-and-forget)
+            triggerAIAnalysis(payload.jobId);
+
         } else if (payload.status === 'failed') {
             console.error(`❌ Job falló: ${payload.error}`);
 
@@ -197,6 +200,31 @@ async function sendTelegramNotification(data: {
     } catch (error) {
         console.error('⚠️ Error sending Telegram notification:', error);
         // No lanzamos error para no afectar el callback principal
+    }
+}
+
+// Fire-and-forget AI analysis trigger
+async function triggerAIAnalysis(jobId: string) {
+    try {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://dlosai.vercel.app';
+        const apiKey = process.env.CALLBACK_API_KEY;
+
+        const response = await fetch(`${appUrl}/api/agents/analyze`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+            },
+            body: JSON.stringify({ jobId }),
+        });
+
+        if (!response.ok) {
+            console.warn(`⚠️ AI analysis trigger failed: ${response.status}`);
+        } else {
+            console.log('🤖 AI analysis triggered successfully');
+        }
+    } catch (error) {
+        console.error('⚠️ Error triggering AI analysis:', error);
     }
 }
 

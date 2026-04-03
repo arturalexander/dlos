@@ -14,6 +14,26 @@ import { retryFailedJob } from '@/lib/gpu-queue';
  * 
  * Para probarlo manualmente: curl https://tuapp.com/api/retry-monitor
  */
+// Tiempo máximo que un job puede estar en 'starting' antes de considerarse atascado
+const STUCK_STARTING_MINUTES = 20;
+
+async function destroyVastInstance(instanceId: string): Promise<boolean> {
+    const VAST_API_KEY = process.env.VAST_API_KEY;
+    if (!VAST_API_KEY || !instanceId) return false;
+    try {
+        const response = await fetch(
+            `https://console.vast.ai/api/v0/instances/${instanceId}/`,
+            {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${VAST_API_KEY}`, 'Accept': 'application/json' }
+            }
+        );
+        return response.status === 200 || response.status === 204;
+    } catch {
+        return false;
+    }
+}
+
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
 
@@ -33,11 +53,64 @@ export async function GET(request: NextRequest) {
             where('retryCount', '<=', 5)
         );
 
+        // ── DETECCIÓN DE INSTANCIAS ATASCADAS ────────────────────
+        const stuckCutoff = new Date(Date.now() - STUCK_STARTING_MINUTES * 60 * 1000);
+        const qStuck = query(
+            jobsRef,
+            where('status', 'in', ['starting', 'processing']),
+        );
+        const stuckSnapshot = await getDocs(qStuck);
+        let stuckKilled = 0;
+
+        for (const docSnapshot of stuckSnapshot.docs) {
+            const jobData = docSnapshot.data();
+            const jobId   = docSnapshot.id;
+            const updatedAt: Date = jobData.updatedAt?.toDate?.() || new Date(0);
+
+            if (updatedAt > stuckCutoff) continue; // No lleva suficiente tiempo
+
+            const minutesStuck = Math.round((Date.now() - updatedAt.getTime()) / 60000);
+            console.log(`\n⚠️ Job ATASCADO detectado: ${jobId}`);
+            console.log(`   Status: ${jobData.status} | Atascado: ${minutesStuck} min`);
+            console.log(`   Instancia: ${jobData.workerInstanceId} | Host: ${jobData.vastHostId}`);
+
+            // Destruir instancia en Vast.ai
+            if (jobData.workerInstanceId) {
+                const destroyed = await destroyVastInstance(String(jobData.workerInstanceId));
+                console.log(`   🔌 Instancia destruida: ${destroyed ? '✅' : '❌'}`);
+            }
+
+            // Resetear job a queued, banear host
+            const jobRef = doc(db, 'processing_jobs', jobId);
+            const updateData: any = {
+                status: 'queued',
+                retryCount: (jobData.retryCount || 0) + 1,
+                lastError: `Instancia atascada ${minutesStuck} min en status '${jobData.status}'`,
+                workerInstanceId: null,
+                updatedAt: serverTimestamp()
+            };
+            if (jobData.vastHostId) {
+                const existing = jobData.failedGpuHosts || [];
+                if (!existing.includes(jobData.vastHostId)) {
+                    updateData.failedGpuHosts = [...existing, jobData.vastHostId];
+                    console.log(`   🚫 Host ${jobData.vastHostId} añadido a failedGpuHosts`);
+                }
+            }
+            await setDoc(jobRef, updateData, { merge: true });
+            stuckKilled++;
+            console.log(`   ✅ Job ${jobId} devuelto a cola`);
+        }
+
+        if (stuckKilled > 0) {
+            console.log(`\n🔥 Instancias atascadas eliminadas: ${stuckKilled}`);
+        }
+        // ─────────────────────────────────────────────────────────
+
         console.log('🔍 Buscando jobs para reintentar...');
         const snapshot = await getDocs(q);
         console.log(`   Encontrados: ${snapshot.size} jobs`);
 
-        if (snapshot.empty) {
+        if (snapshot.empty && stuckKilled === 0) {
             console.log('✅ No hay jobs pendientes de retry');
             console.log('='.repeat(60) + '\n');
 
@@ -45,6 +118,7 @@ export async function GET(request: NextRequest) {
                 success: true,
                 checked: 0,
                 retried: 0,
+                stuckKilled: 0,
                 timestamp: new Date().toISOString(),
                 duration: Date.now() - startTime
             });
@@ -189,6 +263,7 @@ export async function GET(request: NextRequest) {
             success: true,
             checked: snapshot.size,
             retried: retriedCount,
+            stuckKilled,
             results,
             timestamp: new Date().toISOString(),
             duration

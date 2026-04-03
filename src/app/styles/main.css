@@ -1,11 +1,14 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
 @import "tailwindcss";
 
 @theme {
-    --color-primary: #06B6D4;
-    --color-background-light: #F8FAFC;
-    --color-background-dark: #0F172A;
+    --color-primary:    #007BFF;
+    --color-secondary:  #171717;
+    --color-tertiary:   #9A9A9A;
+    --color-neutral:    #F3F4F6;
+    --color-background-light: #F3F4F6;
+    --color-background-dark: #171717;
     --color-surface-dark: #1E293B;
     --color-accent-orange: #F59E0B;
     --font-display: "Inter", sans-serif;
@@ -43,12 +46,72 @@
 
 :root {
     color-scheme: light;
-    /* Enforce light mode */
+}
+
+html.dark {
+    color-scheme: dark;
 }
 
 body {
     font-family: 'Inter', sans-serif;
 }
+
+/* ── Login page ───────────────────────────────────────────── */
+.login-overlay {
+  background: linear-gradient(
+    to right,
+    rgba(255,255,255,0.08) 0%,
+    rgba(255,255,255,0.04) 60%,
+    rgba(255,255,255,0.0) 100%
+  );
+}
+.glass-panel {
+  border: 1px solid rgba(220,228,240,0.7);
+  background: rgba(245,247,250,0.88);
+  box-shadow: 0 8px 40px -8px rgba(15,23,42,0.18);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+@keyframes antoniaSway {
+  0%, 100% { transform: rotate(-1.5deg); }
+  50% { transform: rotate(1.5deg); }
+}
+@keyframes antoniaWaveHand {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(18deg); }
+  40% { transform: rotate(-8deg); }
+  60% { transform: rotate(18deg); }
+  80% { transform: rotate(-4deg); }
+}
+@keyframes bubbleIn {
+  0% { opacity: 0; transform: translateY(6px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Dark mode overrides ──────────────────────────────────── */
+html.dark body                          { background-color: #0f172a !important; color: #f1f5f9 !important; }
+html.dark .bg-white                     { background-color: #1e293b !important; }
+html.dark .bg-slate-50                  { background-color: #0f172a !important; }
+html.dark .bg-slate-100                 { background-color: #1e293b !important; }
+html.dark .bg-slate-200                 { background-color: #334155 !important; }
+html.dark .hover\:bg-slate-50:hover     { background-color: #1e293b !important; }
+html.dark .hover\:bg-slate-100:hover    { background-color: #334155 !important; }
+html.dark .hover\:bg-slate-200:hover    { background-color: #334155 !important; }
+html.dark .border-slate-100             { border-color: #1e293b !important; }
+html.dark .border-slate-200             { border-color: #334155 !important; }
+html.dark .divide-slate-50 > *          { border-color: #1e293b !important; }
+html.dark .divide-slate-100 > *         { border-color: #1e293b !important; }
+html.dark .text-slate-900               { color: #f8fafc !important; }
+html.dark .text-slate-800               { color: #f1f5f9 !important; }
+html.dark .text-slate-700               { color: #e2e8f0 !important; }
+html.dark .text-slate-600               { color: #cbd5e1 !important; }
+html.dark .text-slate-500               { color: #94a3b8 !important; }
+html.dark .text-slate-400               { color: #64748b !important; }
+html.dark .shadow-sm                    { box-shadow: 0 1px 3px rgba(0,0,0,0.4) !important; }
+html.dark .shadow-lg                    { box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important; }
+/* Maps and images stay unaffected */
+html.dark .maplibregl-map               { filter: none !important; }
+html.dark canvas                        { filter: none !important; }
 
 /* Custom Utilities */
 .glass {
@@ -69,4 +132,101 @@ body {
 .hide-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+}
+
+/* ── Alert animations ───────────────────────────────── */
+.ring-pulse {
+    animation: ringPulse 2s ease-in-out infinite;
+}
+
+@keyframes ringPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+    70%  { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.ring-pulse-orange {
+    animation: ringPulseOrange 2s ease-in-out infinite;
+}
+
+@keyframes ringPulseOrange {
+    0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+    70%  { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+/* ── Card elevation levels ──────────────────────────── */
+.card-base {
+    background: white;
+    border-radius: 1rem;
+    border: 1px solid rgba(226, 232, 240, 1);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.03);
+    transition: box-shadow 0.2s ease;
+}
+
+.card-base:hover {
+    box-shadow: 0 4px 6px rgba(0,0,0,0.07), 0 10px 20px rgba(0,0,0,0.05);
+}
+
+/* ── Fire risk levels ───────────────────────────────── */
+.risk-bajo    { background: linear-gradient(135deg, #d1fae5 0%, #ecfdf5 100%); }
+.risk-moderado{ background: linear-gradient(135deg, #fef9c3 0%, #fffde7 100%); }
+.risk-alto    { background: linear-gradient(135deg, #fee2e2 0%, #fff5f5 100%); }
+.risk-extremo { background: linear-gradient(135deg, #fca5a5 0%, #fee2e2 100%); }
+
+/* ── Status dots ────────────────────────────────────── */
+.dot-online  { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
+.dot-warning { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.2); }
+.dot-offline { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.2); }
+
+/* ── Sidebar gradient accent ────────────────────────── */
+.sidebar-active {
+    background: linear-gradient(90deg, rgba(6,182,212,0.12) 0%, rgba(6,182,212,0.04) 100%);
+    border-left: 3px solid #06B6D4;
+}
+
+/* ── Metric skeleton loading ────────────────────────── */
+.skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 0.5rem;
+}
+
+@keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ── AntonIA button animations ─────────────────────── */
+@keyframes antoniaBounce {
+    0%, 100% { transform: translateY(0);    }
+    10%       { transform: translateY(-6px); }
+    20%       { transform: translateY(0);    }
+    30%       { transform: translateY(-3px); }
+    40%       { transform: translateY(0);    }
+}
+
+@keyframes antoniaWiggle {
+    0%, 100% { transform: rotate(0deg);   }
+    10%       { transform: rotate(-15deg); }
+    20%       { transform: rotate(12deg);  }
+    30%       { transform: rotate(-8deg);  }
+    40%       { transform: rotate(5deg);   }
+    50%       { transform: rotate(0deg);   }
+}
+
+/* ── Tab indicator ──────────────────────────────────── */
+.tab-active-underline {
+    position: relative;
+}
+.tab-active-underline::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #06B6D4;
+    border-radius: 2px 2px 0 0;
 }

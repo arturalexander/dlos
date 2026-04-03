@@ -1,4 +1,4 @@
-// Types for Cattle Vision mission data
+// Types for DLOS AI mission data
 
 export interface MissionSummary {
     total_confirmed_cows: number;

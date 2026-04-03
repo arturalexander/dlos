@@ -1,17 +1,2 @@
-﻿node_modules
-.next
-.git
-.env.local
-*.log
-.DS_Store
-.vercel
-.idea
-*.psd
-*.sketch
-coverage
-dist
-build
-tmp
-temp
-*.tmp
-*.swp
+# Backend dock3 — se despliega en Railway, no en Vercel
+s/

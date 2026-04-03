@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── galisancho_access ────────────────────────────────────────────────────
+    // Colección que controla qué emails pueden ver el dashboard de Galisancho.
+    match /galisancho_access/{email} {
+      // Cualquier usuario autenticado puede LEER (necesario para AppShell)
+      allow read: if request.auth != null;
+
+      // Solo el admin de Galisancho puede ESCRIBIR (añadir / eliminar)
+      allow write: if request.auth != null
+        && request.auth.uid == 'lxOXBSJziCdAnpkf42qWqihAc5N2';
+    }
+
+    // ── Resto de colecciones — ajusta según tu esquema ───────────────────────
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

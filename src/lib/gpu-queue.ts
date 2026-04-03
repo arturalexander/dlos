@@ -7,8 +7,11 @@ interface GPUJobData {
     flightId: string;
     missionId?: string;
     missionName: string;
-    videoUrl: string;
-    videoExpiresAt: string;
+    // FlytBase: URL firmada temporal
+    videoUrl?: string;
+    videoExpiresAt?: string;
+    // AWS S3: clave directa en el bucket (no expira)
+    videoS3Key?: string;
     videoFileName: string;
     videoFileSize: number;
     siteId: string;
@@ -33,6 +36,11 @@ export async function enqueueGPUJob(jobData: GPUJobData): Promise<string> {
 
     try {
         const jobRef = doc(db, 'processing_jobs', jobId);
+        // Validar que haya al menos una fuente de video
+        if (!jobData.videoUrl && !jobData.videoS3Key) {
+            throw new Error('Se requiere videoUrl (FlytBase) o videoS3Key (AWS S3)');
+        }
+
         await setDoc(jobRef, {
             jobId,
             status: 'queued',
@@ -42,10 +50,14 @@ export async function enqueueGPUJob(jobData: GPUJobData): Promise<string> {
             organizationId: jobData.organizationId,
             siteId: jobData.siteId,
             siteName: jobData.siteName,
-            videoUrl: jobData.videoUrl,
+            // FlytBase (URL firmada temporal)
+            videoUrl: jobData.videoUrl || null,
+            videoExpiresAt: jobData.videoExpiresAt || null,
+            // AWS S3 (clave directa, no expira)
+            videoS3Key: jobData.videoS3Key || null,
+            videoSource: jobData.videoS3Key ? 'aws_s3' : 'flytbase',
             videoFileName: jobData.videoFileName,
             videoFileSize: jobData.videoFileSize || 0,
-            videoExpiresAt: jobData.videoExpiresAt,
             telemetryFiles: jobData.telemetryFiles || [],
             workerType: 'vast-on-demand',
             workerInstanceId: null,
@@ -443,8 +455,8 @@ export async function retryFailedJob(jobId: string): Promise<VastResult> {
 
         const jobData = jobDoc.data();
 
-        // Verificar que no haya expirado el video
-        if (jobData.videoExpiresAt) {
+        // Verificar que no haya expirado el video (solo aplica a FlytBase, S3 no expira)
+        if (jobData.videoSource !== 'aws_s3' && jobData.videoExpiresAt) {
             const expiresAt = new Date(jobData.videoExpiresAt);
             if (new Date() > expiresAt) {
                 throw new Error('URL del video expirada - no se puede reintentar');
