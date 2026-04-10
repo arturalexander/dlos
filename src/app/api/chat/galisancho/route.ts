@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { fetchKGContext } from '@/lib/kg';
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION || 'eu-west-1',
@@ -274,10 +275,11 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ reply:'Falta GEMINI_API_KEY en .env.local' });
 
-  let ctx, weather, insights, recentConvs, facts, fincaConfig;
+  let ctx, weather, insights, recentConvs, facts, fincaConfig, kgContext;
   try {
-    [ctx, weather, insights, recentConvs, facts, fincaConfig] = await Promise.all([
+    [ctx, weather, insights, recentConvs, facts, fincaConfig, kgContext] = await Promise.all([
       fetchContext(), fetchWeather(), fetchInsights(), fetchRecentConversations(8), fetchFacts(), fetchFincaConfig(),
+      fetchKGContext(72),
     ]);
   } catch (e:any) { return NextResponse.json({ reply:'Error al leer datos de la finca.' }); }
 
@@ -365,6 +367,12 @@ ${insights.map(ins => `• [${ins.category}] ${ins.text}`).join('\n')}
 
 ${recentConvs.length > 0 ? `CONVERSACIONES RECIENTES (contexto de sesiones anteriores):
 ${recentConvs.map(c => `  Usuario: ${c.user}\n  Antonia: ${c.bot.slice(0, 400)}${c.bot.length > 400 ? '…' : ''}`).join('\n---\n')}` : ''}
+
+${kgContext ? `=== KNOWLEDGE GRAPH — ENTIDADES Y ACTIVIDAD RECIENTE DE LA FINCA ===
+El Knowledge Graph conecta todos los activos de la finca: vehículos, zonas, ganado, sensores y documentos.
+Úsalo para responder preguntas cruzadas como "¿qué hizo el tractor ayer?", "¿dónde estaban las vacas esta mañana?", "¿quién estuvo en la Dehesa Norte?".
+${kgContext}
+=== FIN KNOWLEDGE GRAPH ===` : ''}
 
 === FIN DATOS ===`;
 
