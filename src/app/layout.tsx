@@ -36,6 +36,11 @@ export default function RootLayout({
         `}} />
       </head>
       <body suppressHydrationWarning className="bg-slate-50 text-slate-900 min-h-screen flex antialiased pb-16 lg:pb-0">
+        {process.env.NEXT_PUBLIC_ENV === 'staging' && (
+          <div className="fixed top-0 left-0 right-0 z-[9999] bg-amber-400 text-amber-900 text-xs font-bold text-center py-1 tracking-wide">
+            ENTORNO DE PRUEBAS — staging
+          </div>
+        )}
         <AuthProvider>
           <PreferencesProvider>
             <AppShell>{children}</AppShell>
