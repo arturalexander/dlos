@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Finca Galisancho <onboarding@resend.dev>',
+      from: 'Finca Galisancho <informes@dlos.ai>',
       to: [email],
       subject: `Informe de gestión — ${periodo}`,
       html: `
