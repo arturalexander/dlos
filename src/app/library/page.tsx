@@ -5,7 +5,9 @@
 // Thumbnails: primer frame via canvas (vídeos) o presigned URL directo (fotos)
 // Vídeos se cargan SOLO al hacer click para evitar egress innecesario
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface MediaItem {
@@ -56,8 +58,263 @@ function drainUrlQueue() {
   }
 }
 
+// ── Analyze Modal ─────────────────────────────────────────────────────────────
+function AnalyzeModal({ item, onClose }: { item: MediaItem; onClose: () => void }) {
+  const [target, setTarget]   = useState('');
+  const [status, setStatus]   = useState<'idle' | 'loading' | 'queued' | 'processing' | 'completed' | 'failed'>('idle');
+  const [jobId,  setJobId]    = useState<string | null>(null);
+  const [result, setResult]   = useState<any>(null);
+  const [error,  setError]    = useState<string | null>(null);
+
+  const SUGGESTIONS = ['persona', 'tractor', 'vehículo', 'incendio', 'animal', 'agua', 'camión', 'perro'];
+
+  async function startAnalysis() {
+    if (!target.trim()) return;
+    setStatus('loading'); setError(null);
+    try {
+      const res  = await fetch('/api/galisancho/library/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoKey: item.key, targetObject: target.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error ?? 'Error al lanzar análisis');
+      setJobId(data.jobId);
+      setStatus('queued');
+    } catch (e: any) {
+      setError(e.message); setStatus('failed');
+    }
+  }
+
+  // Polling Firestore cuando hay jobId
+  useEffect(() => {
+    if (!jobId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'object_search_jobs')),
+      snap => {
+        const doc = snap.docs.find(d => d.id === jobId);
+        if (!doc) return;
+        const data = doc.data();
+        setStatus(data.status);
+        if (data.status === 'completed') setResult(data.results);
+        if (data.status === 'failed')    setError(data.error ?? 'Error desconocido');
+      }
+    );
+    return () => unsub();
+  }, [jobId]);
+
+  // ESC para cerrar
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => e.key === 'Escape' && status !== 'loading' && onClose();
+    window.addEventListener('keydown', fn);
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', fn); document.body.style.overflow = ''; };
+  }, [onClose, status]);
+
+  return (
+    <div onClick={() => status !== 'loading' && onClose()}
+         className="fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div onClick={e => e.stopPropagation()}
+           className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
+          <div className="w-9 h-9 bg-violet-50 rounded-xl flex items-center justify-center shrink-0">
+            <span className="material-icons-round text-lg text-violet-600">manage_search</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-slate-900">Buscar objeto en vídeo</p>
+            <p className="text-xs text-slate-400 truncate">{item.name}</p>
+          </div>
+          {status !== 'loading' && (
+            <button onClick={onClose}
+                    className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-red-50 hover:text-red-500 text-slate-500 transition-colors">
+              <span className="material-icons-round text-lg">close</span>
+            </button>
+          )}
+        </div>
+
+        <div className="px-5 py-5 space-y-4">
+
+          {/* Input fase */}
+          {status === 'idle' && (
+            <>
+              <p className="text-sm text-slate-600">
+                Escribe qué objeto quieres buscar. La IA analizará el vídeo y te mostrará en qué momentos aparece con capturas.
+              </p>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5 block">
+                  Objeto a buscar
+                </label>
+                <input
+                  autoFocus
+                  value={target}
+                  onChange={e => setTarget(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && startAnalysis()}
+                  placeholder="ej: tractor, persona, incendio..."
+                  className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 transition"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {SUGGESTIONS.map(s => (
+                  <button key={s} onClick={() => setTarget(s)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-violet-50 hover:text-violet-600 transition-colors">
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <span className="material-icons-round text-amber-500" style={{ fontSize: 16 }}>info</span>
+                <p className="text-xs text-amber-700">Se lanzará una GPU en Vast.ai (~0.02€). El análisis tarda 3-8 min.</p>
+              </div>
+              <button
+                onClick={startAnalysis}
+                disabled={!target.trim()}
+                className="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <span className="material-icons-round" style={{ fontSize: 18 }}>play_circle</span>
+                Analizar vídeo
+              </button>
+            </>
+          )}
+
+          {/* Lanzando */}
+          {status === 'loading' && (
+            <div className="py-8 text-center">
+              <div className="w-10 h-10 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm font-semibold text-slate-700">Lanzando GPU en Vast.ai...</p>
+              <p className="text-xs text-slate-400 mt-1">Buscando instancia disponible</p>
+            </div>
+          )}
+
+          {/* En cola / procesando */}
+          {(status === 'queued' || status === 'processing') && (
+            <div className="py-6 text-center space-y-3">
+              <div className="w-12 h-12 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <div>
+                <p className="text-sm font-bold text-slate-800">
+                  {status === 'queued' ? 'GPU preparándose...' : `Analizando "${target}"...`}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {status === 'queued'
+                    ? 'El contenedor está arrancando (1-2 min)'
+                    : 'YOLO-World está procesando el vídeo (3-8 min)'}
+                </p>
+              </div>
+              <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-2 inline-block">
+                <p className="text-xs text-violet-600 font-mono">Job: {jobId?.slice(0, 12)}...</p>
+              </div>
+              <p className="text-xs text-slate-400">Esta ventana se actualiza automáticamente</p>
+            </div>
+          )}
+
+          {/* Error */}
+          {status === 'failed' && (
+            <div className="space-y-3">
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                <span className="material-icons-round text-3xl text-red-400 mb-2">error_outline</span>
+                <p className="text-sm font-bold text-red-600">Análisis fallido</p>
+                <p className="text-xs text-red-400 mt-1">{error}</p>
+              </div>
+              <button onClick={() => { setStatus('idle'); setError(null); setJobId(null); }}
+                      className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold transition-colors">
+                Intentar de nuevo
+              </button>
+            </div>
+          )}
+
+          {/* Resultados */}
+          {status === 'completed' && result && (
+            <div className="space-y-4">
+              {/* Resumen */}
+              <div className={`rounded-xl p-4 border ${result.found ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`material-icons-round text-xl ${result.found ? 'text-emerald-500' : 'text-slate-400'}`}>
+                    {result.found ? 'check_circle' : 'search_off'}
+                  </span>
+                  <p className={`text-sm font-bold ${result.found ? 'text-emerald-700' : 'text-slate-600'}`}>
+                    {result.found
+                      ? `"${result.targetObject}" encontrado`
+                      : `"${result.targetObject}" no encontrado`}
+                  </p>
+                </div>
+                {result.found && (
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    {[
+                      { label: 'Detecciones', value: result.totalDetections },
+                      { label: 'Visible', value: `${result.totalVisibleSecs}s` },
+                      { label: 'Confianza', value: `${(result.avgConfidence * 100).toFixed(0)}%` },
+                    ].map(s => (
+                      <div key={s.label} className="bg-white rounded-lg p-2 text-center border border-emerald-100">
+                        <p className="text-base font-black text-slate-900">{s.value}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Timeline de segmentos */}
+              {result.segments?.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Aparece en</p>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {result.segments.map((seg: any, i: number) => (
+                      <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5 text-xs">
+                        <span className="material-icons-round text-violet-500" style={{ fontSize: 14 }}>schedule</span>
+                        <span className="font-mono text-slate-700">
+                          {Math.floor(seg.start / 60)}:{String(Math.floor(seg.start % 60)).padStart(2, '0')}
+                          {' → '}
+                          {Math.floor(seg.end / 60)}:{String(Math.floor(seg.end % 60)).padStart(2, '0')}
+                        </span>
+                        <span className="text-slate-400 ml-auto">{seg.duration.toFixed(0)}s</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Capturas */}
+              {result.captures?.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+                    Capturas ({result.captures.length})
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                    {result.captures.map((cap: any, i: number) => (
+                      <a key={i} href={cap.bboxUrl} target="_blank" rel="noopener noreferrer"
+                         className="group relative block aspect-video bg-slate-100 rounded-xl overflow-hidden border border-slate-200 hover:border-violet-300 transition-colors">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={cap.bboxUrl} alt={`Captura ${i + 1}`}
+                             className="w-full h-full object-cover" loading="lazy" />
+                        <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between">
+                          <span className="bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">
+                            {Math.floor(cap.second / 60)}:{String(Math.floor(cap.second % 60)).padStart(2, '0')}
+                          </span>
+                          <span className="bg-violet-600/90 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                            {(cap.conf * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={() => { setStatus('idle'); setResult(null); setJobId(null); setTarget(''); }}
+                      className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold transition-colors">
+                Buscar otro objeto
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Media Card ────────────────────────────────────────────────────────────────
-function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) {
+function MediaCard({ item, onClick, onAnalyze }: { item: MediaItem; onClick: () => void; onAnalyze?: () => void }) {
   const cardRef  = useRef<HTMLDivElement>(null);
   const [visible, setVisible]     = useState(false);
   const [videoUrl, setVideoUrl]   = useState<string | null>(null);
@@ -166,6 +423,16 @@ function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) 
             <span className="material-icons-round" style={{ fontSize: 11 }}>folder</span>
             {item.mission}
           </p>
+        )}
+        {/* Botón analizar — solo vídeos */}
+        {isVideo && onAnalyze && (
+          <button
+            onClick={e => { e.stopPropagation(); onAnalyze(); }}
+            className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-600 text-xs font-bold transition-colors border border-violet-100"
+          >
+            <span className="material-icons-round" style={{ fontSize: 14 }}>manage_search</span>
+            Buscar objeto
+          </button>
         )}
       </div>
     </div>
@@ -311,10 +578,11 @@ export default function LibraryPage() {
   const [error, setError]       = useState<string | null>(null);
   const [filter, setFilter]     = useState<'all' | 'video' | 'photo'>('all');
   const [search, setSearch]     = useState('');
-  const [selected, setSelected] = useState<MediaItem | null>(null);
-  const [total, setTotal]       = useState(0);
-  const [syncing, setSyncing]   = useState(false);
-  const [syncMsg, setSyncMsg]   = useState<string | null>(null);
+  const [selected,  setSelected]  = useState<MediaItem | null>(null);
+  const [analyzing, setAnalyzing] = useState<MediaItem | null>(null);
+  const [total, setTotal]         = useState(0);
+  const [syncing, setSyncing]     = useState(false);
+  const [syncMsg, setSyncMsg]     = useState<string | null>(null);
 
   async function syncRoutes() {
     setSyncing(true);
@@ -508,7 +776,10 @@ export default function LibraryPage() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
               {dateItems.map(item => (
-                <MediaCard key={item.key} item={item} onClick={() => setSelected(item)} />
+                <MediaCard key={item.key} item={item}
+                  onClick={() => setSelected(item)}
+                  onAnalyze={item.type === 'video' ? () => setAnalyzing(item) : undefined}
+                />
               ))}
             </div>
           </div>
@@ -524,6 +795,7 @@ export default function LibraryPage() {
       {/* Modals */}
       {selected?.type === 'video' && <VideoModal item={selected} onClose={() => setSelected(null)} />}
       {selected?.type === 'photo' && <PhotoModal item={selected} onClose={() => setSelected(null)} />}
+      {analyzing && <AnalyzeModal item={analyzing} onClose={() => setAnalyzing(null)} />}
     </div>
   );
 }
