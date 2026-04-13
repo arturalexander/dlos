@@ -17,7 +17,7 @@ const CALLBACK_URL  = process.env.NEXT_PUBLIC_APP_URL
 const CALLBACK_API_KEY = process.env.CALLBACK_API_KEY ?? '';
 
 // Docker image para YOLO-World (la subiremos a Docker Hub)
-const DOCKER_IMAGE = process.env.OBJECT_SEARCH_DOCKER_IMAGE ?? 'dlosai/object-search-worker:latest';
+const DOCKER_IMAGE = process.env.OBJECT_SEARCH_DOCKER_IMAGE ?? 'arturalexander/object-search-worker:latest';
 
 // GPU mínima para YOLO-World (más barato que el worker de vacas)
 const GPU_FILTER = 'reliability > 0.95 num_gpus=1 gpu_ram >= 8 cuda_vers >= 11.8';
