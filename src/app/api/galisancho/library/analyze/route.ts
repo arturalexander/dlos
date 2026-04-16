@@ -1,26 +1,22 @@
 /**
  * POST /api/galisancho/library/analyze
  *
- * Lanza un job de búsqueda de objetos en vídeo usando YOLO-World en Vast.ai.
- * Mismo flow que las misiones del dron pero con targetObject (texto libre).
+ * Encola un job SAM 3 en Modal (serverless, sin Vast.ai).
+ * El worker vive en `cow-counter-gpu/modal_worker.py`.
  *
- * Body: { videoKey: string, targetObject: string }
+ * Body: { videoKey: string, targetObject: string }   // comas = múltiples objetos
+ *
+ * Env vars requeridas:
+ *   MODAL_WORKER_URL     → https://<user>--sam3-object-search-enqueue.modal.run
+ *   MODAL_API_KEY        → (opcional) debe coincidir con el MODAL_API_KEY del secret
+ *   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION / AWS_S3_BUCKET
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { collection, addDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-const VAST_API_KEY  = process.env.VAST_API_KEY!;
-const CALLBACK_URL  = process.env.NEXT_PUBLIC_APP_URL
-  ? `${process.env.NEXT_PUBLIC_APP_URL}/api/processing/callback`
-  : process.env.CALLBACK_URL ?? '';
-const CALLBACK_API_KEY = process.env.CALLBACK_API_KEY ?? '';
-
-// Docker image para YOLO-World (la subiremos a Docker Hub)
-const DOCKER_IMAGE = process.env.OBJECT_SEARCH_DOCKER_IMAGE ?? 'arturalexander/object-search-worker:latest';
-
-// GPU mínima para YOLO-World (más barato que el worker de vacas)
-const GPU_FILTER = 'reliability > 0.95 num_gpus=1 gpu_ram >= 8 cuda_vers >= 11.8';
+const MODAL_WORKER_URL = process.env.MODAL_WORKER_URL ?? '';
+const MODAL_API_KEY    = process.env.MODAL_API_KEY ?? '';
 
 async function getVideoPresignedUrl(key: string): Promise<string | null> {
   try {
@@ -44,69 +40,6 @@ async function getVideoPresignedUrl(key: string): Promise<string | null> {
   }
 }
 
-async function launchVastInstance(jobId: string, videoUrl: string, targetObject: string, videoKey: string) {
-  // Buscar oferta disponible
-  const searchRes = await fetch(
-    `https://console.vast.ai/api/v0/bundles/?q=${encodeURIComponent(JSON.stringify({
-      gpu_name: { '$in': ['RTX 3080', 'RTX 3090', 'RTX 4090', 'A4000', 'A5000', 'RTX 4080', 'RTX 4070'] },
-      num_gpus: { '$eq': 1 },
-      reliability2: { '$gte': 0.95 },
-      cuda_max_good: { '$gte': 11.8 },
-      rentable: { '$eq': true },
-      rented: { '$eq': false },
-    }))}`,
-    { headers: { Authorization: `Bearer ${VAST_API_KEY}` } }
-  );
-
-  if (!searchRes.ok) throw new Error(`Vast search failed: ${searchRes.status}`);
-  const searchData = await searchRes.json();
-  const offers: any[] = searchData.offers ?? [];
-  if (!offers.length) throw new Error('No hay GPUs disponibles en Vast.ai');
-
-  // Ordenar por precio
-  const sorted = offers.sort((a, b) => a.dph_total - b.dph_total);
-  const best = sorted[0];
-
-  const env: Record<string, string> = {
-    JOB_ID:            jobId,
-    VIDEO_URL:         videoUrl,
-    VIDEO_KEY:         videoKey,
-    TARGET_OBJECT:     targetObject,
-    CALLBACK_URL:      CALLBACK_URL,
-    CALLBACK_API_KEY:  CALLBACK_API_KEY,
-    AUTO_SHUTDOWN:     'true',
-    VAST_API_KEY:      VAST_API_KEY,
-    AWS_ACCESS_KEY_ID:     process.env.AWS_ACCESS_KEY_ID ?? '',
-    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-    AWS_REGION:            process.env.AWS_REGION ?? 'eu-west-1',
-    AWS_S3_BUCKET:         process.env.AWS_S3_BUCKET ?? 'dlosai-media-prod',
-    FIREBASE_SERVICE_ACCOUNT: process.env.FIREBASE_SERVICE_ACCOUNT_JSON ?? '',
-    FIREBASE_PROJECT_ID:      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? 'dlos-ai',
-  };
-
-  const createRes = await fetch('https://console.vast.ai/api/v0/asks/', {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${VAST_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id:   'me',
-      image:       DOCKER_IMAGE,
-      disk:        20,
-      label:       `object-search-${jobId.slice(0, 8)}`,
-      onstart:     `python /app/object_worker.py`,
-      env:         Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' '),
-      id:          best.id,
-    }),
-  });
-
-  if (!createRes.ok) {
-    const err = await createRes.text();
-    throw new Error(`Vast create failed: ${err}`);
-  }
-
-  const createData = await createRes.json();
-  return { instanceId: createData.new_contract, gpuName: best.gpu_name, pricePerHour: best.dph_total };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const { videoKey, targetObject } = await req.json().catch(() => ({}));
@@ -115,51 +48,87 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Faltan videoKey o targetObject' }, { status: 400 });
     }
 
-    if (!VAST_API_KEY) {
-      return NextResponse.json({ error: 'VAST_API_KEY no configurada' }, { status: 500 });
+    if (!MODAL_WORKER_URL) {
+      return NextResponse.json(
+        { error: 'MODAL_WORKER_URL no configurada. Desplegar con `modal deploy modal_worker.py` y copiar la URL.' },
+        { status: 500 }
+      );
     }
 
-    const target = targetObject.trim().toLowerCase();
+    // Soporta múltiples objetos separados por coma
+    const targets: string[] = targetObject
+      .split(',')
+      .map((t: string) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 6);
 
-    // 1. Crear job en Firestore
-    const jobRef = await addDoc(collection(db, 'object_search_jobs'), {
-      type:         'object_search',
-      videoKey,
-      targetObject: target,
-      status:       'queued',
-      createdAt:    Timestamp.now(),
-      updatedAt:    Timestamp.now(),
-    });
+    if (targets.length === 0) {
+      return NextResponse.json({ error: 'targetObject vacío' }, { status: 400 });
+    }
 
-    const jobId = jobRef.id;
+    // 1. Crear un job en Firestore por cada objeto (estado "queued")
+    const jobIds: string[] = [];
+    for (const t of targets) {
+      const ref = await addDoc(collection(db, 'object_search_jobs'), {
+        type:         'object_search',
+        videoKey,
+        targetObject: t,
+        status:       'queued',
+        createdAt:    Timestamp.now(),
+        updatedAt:    Timestamp.now(),
+      });
+      jobIds.push(ref.id);
+    }
 
-    // 2. Obtener URL firmada del vídeo (2h de validez)
+    // 2. Firmar URL del vídeo (válida 2h)
     const videoUrl = await getVideoPresignedUrl(videoKey);
     if (!videoUrl) {
       return NextResponse.json({ error: 'No se pudo generar URL del vídeo' }, { status: 500 });
     }
 
-    // 3. Lanzar instancia Vast.ai
-    let vastInfo: any = null;
+    // 3. Encolar en Modal (spawn async — devuelve ~inmediatamente)
     try {
-      vastInfo = await launchVastInstance(jobId, videoUrl, target, videoKey);
-    } catch (e: any) {
-      // Si falla Vast, el job queda en 'queued' para reintento manual
-      console.error('[ANALYZE] Vast error:', e.message);
-      return NextResponse.json({
-        ok:    true,
-        jobId,
-        warn:  `Job creado pero GPU no disponible: ${e.message}. Reinténtalo en unos minutos.`,
+      const modalRes = await fetch(MODAL_WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobIds,
+          targetObjects: targets,
+          videoUrl,
+          videoKey,
+          apiKey: MODAL_API_KEY || undefined,
+        }),
       });
+
+      if (!modalRes.ok) {
+        const errTxt = await modalRes.text().catch(() => '');
+        console.error('[ANALYZE] Modal error:', modalRes.status, errTxt);
+        return NextResponse.json(
+          { error: `Modal HTTP ${modalRes.status}: ${errTxt.slice(0, 200)}` },
+          { status: 500 }
+        );
+      }
+
+      const modalData = await modalRes.json();
+      if (!modalData.ok) {
+        return NextResponse.json(
+          { error: `Modal: ${modalData.error ?? 'unknown'}` },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        ok:      true,
+        jobIds,
+        jobId:   jobIds[0],
+        targets,
+        callId:  modalData.callId,
+        backend: 'modal',
+      });
+    } catch (e: any) {
+      console.error('[ANALYZE] Modal fetch error:', e);
+      return NextResponse.json({ error: `Error llamando a Modal: ${e.message}` }, { status: 500 });
     }
-
-    return NextResponse.json({
-      ok:    true,
-      jobId,
-      gpu:   vastInfo?.gpuName,
-      price: vastInfo?.pricePerHour,
-    });
-
   } catch (e: any) {
     console.error('[ANALYZE]', e);
     return NextResponse.json({ error: e.message }, { status: 500 });
